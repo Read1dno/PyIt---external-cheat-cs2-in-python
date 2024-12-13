@@ -17,7 +17,7 @@ pip install -r requirements.txt
 
 # Launch
 ```sh
-python PyItV1.0.3.py
+python PyItV1.0.4.py
 ```
 
 # Functions
