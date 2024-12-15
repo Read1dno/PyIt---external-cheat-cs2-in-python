@@ -25,7 +25,7 @@ python PyItV1.0.4.py
 - AIM Bot
 - Trigger Bot
 
-![2024-08-13_12-36-20](https://github.com/user-attachments/assets/af671764-5a8e-4131-973c-4d8d06ba26c7)
+![ds](https://github.com/user-attachments/assets/c8260a66-90bf-4cf9-87a7-0f3102f1cc89)
 
 # Description
 Save the file "config.json" in the path - "AppData\Local\Temp\PyIt". Automatically uploads offsets with a get request to the URL "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output ". To avoid being banned from the public, do not download, but copy the code. You use it directly by interpreting it from python IDLE. At the time of verification, delete the Temp folder from "AppData\Local" and change the file to "print("Hello, world!")" And that's it, congratulations, you didn't get burned.
