@@ -8,7 +8,7 @@ PyIt is a completely free, open-source cheat. It's 100% written in Python, witho
 
 Python 3.10+
 ```sh
-pip install PySide6 requests pymem pywin32 pynput
+pip install PySide6 requests pymem pywin32 pynput qt_material
 ```
 or
 ```sh
