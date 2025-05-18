@@ -604,6 +604,8 @@ def esp(scene, pm, client, offsets, client_dll, window_width, window_height, set
             return
 
 def get_weapon_name_by_index(index):
+    index = index & 0xFFFF
+    
     weapon_names = {
     32: "P2000",
     61: "USP-S",
@@ -632,7 +634,7 @@ def get_weapon_name_by_index(index):
     16: "M4A4",
     60: "M4A1-S",
     8: "AUG",
-    43: "Galil",
+    13: "Galil",
     7: "AK-47",
     39: "SG 553",
     40: "SSG 08",
