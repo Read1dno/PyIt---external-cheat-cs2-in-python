@@ -1,6 +1,10 @@
-PySide6
 requests
-pymem
+psutil
 pywin32
-pynput
-qt_material
+pyautogui
+glfw
+imgui[glfw]
+PyOpenGL
+Pillow
+numpy
+scipy
