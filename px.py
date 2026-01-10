@@ -8,6 +8,7 @@ from PIL import ImageGrab
 from scipy.signal import convolve2d
 from imgui.integrations.glfw import GlfwRenderer
 import win32api, win32con, win32gui
+import msvcrt
 from win32gui import FindWindow
 
 PROCESS_ALL_ACCESS = 0x1F0FFF
@@ -57,14 +58,45 @@ bone_connections = [
     ("right_elbow", "right_wrist"),
 ]
 
-offsets = requests.get('https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json').json()
-client_dll = requests.get('https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json').json()
+import subprocess
 
-#with open('output/offsets.json', 'r') as file:
-#    offsets = json.load(file)
-#
-#with open('output/client_dll.json', 'r') as file:
-#    client_dll = json.load(file)
+# Run cs2-dumper.exe to update offsets
+if __name__ == "__main__":
+    try:
+
+        print("Running cs2-dumper.exe...")
+        subprocess.run(["cs2-dumper.exe"], check=True, cwd=os.getcwd())
+        print("cs2-dumper.exe finished successfully.")
+    except Exception as e:
+        print(f"Failed to run cs2-dumper.exe: {e}")
+        print("Proceeding with existing files...")
+
+# Load offsets - Check output/ directory first (default dumper behavior), then root
+def load_json_file(filename):
+    # Try output/ subdirectory first
+    output_path = os.path.join("output", filename)
+    if os.path.exists(output_path):
+        with open(output_path, 'r') as f:
+            return json.load(f)
+            
+    # Fallback to root directory
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            return json.load(f)
+            
+    raise FileNotFoundError(f"Could not find {filename} in 'output/' or root directory.")
+
+
+try:
+    #offsets = requests.get('https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json').json()
+    #client_dll = requests.get('https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json').json()
+    offsets = load_json_file('offsets.json')
+    client_dll = load_json_file('client_dll.json')
+except Exception as e:
+    print(f"Failed to fetch offsets from GitHub: {e}")
+    print("Falling back to local files...")
+    offsets = load_json_file('offsets.json')
+    client_dll = load_json_file('client_dll.json')
 
 dwEntityList = offsets['client.dll']['dwEntityList']
 dwLocalPlayerPawn = offsets['client.dll']['dwLocalPlayerPawn']
@@ -78,7 +110,16 @@ m_iTeamNum = client_dll['client.dll']['classes']['C_BaseEntity']['fields']['m_iT
 m_lifeState = client_dll['client.dll']['classes']['C_BaseEntity']['fields']['m_lifeState']
 m_pGameSceneNode = client_dll['client.dll']['classes']['C_BaseEntity']['fields']['m_pGameSceneNode']
 m_modelState = client_dll['client.dll']['classes']['CSkeletonInstance']['fields']['m_modelState']
-m_hPlayerPawn = client_dll['client.dll']['classes']['CCSPlayerController']['fields']['m_hPlayerPawn']
+# Manual Fix for m_hPlayerPawn
+try:
+    m_hPlayerPawn = client_dll['client.dll']['classes']['CCSPlayerController']['fields']['m_hPlayerPawn']
+except:
+    m_hPlayerPawn = 0x6B4 
+
+print(f"[INFO] m_hPlayerPawn == {m_hPlayerPawn}")
+if m_hPlayerPawn == 2300: # 0x8FC seems wrong for current patch
+    print("[FIX] Overriding m_hPlayerPawn 2300 -> 0x6B4")
+    m_hPlayerPawn = 0x6B4
 m_iHealth = client_dll['client.dll']['classes']['C_BaseEntity']['fields']['m_iHealth']
 m_iszPlayerName = client_dll['client.dll']['classes']['CBasePlayerController']['fields']['m_iszPlayerName']
 m_pClippingWeapon = client_dll['client.dll']['classes']['C_CSPlayerPawn']['fields']['m_pClippingWeapon']
@@ -115,10 +156,19 @@ def make_dpi_aware():
         except (AttributeError, OSError):
             pass
 make_dpi_aware()
-WINDOW_WIDTH, WINDOW_HEIGHT = win32api.GetSystemMetrics(win32con.SM_CXSCREEN), win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+# Force resolution as requested
+WINDOW_WIDTH = 1920
+WINDOW_HEIGHT = 1080
+
 
 def wait_cs2():
+    print("Waiting for CS2... Press 'q' to quit.")
     while True:
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            if key.lower() == b'q':
+                print("Quitting...")
+                return False
         time.sleep(1)
         try:
             idprocess = GetProcessIdByName("cs2.exe")
@@ -144,17 +194,20 @@ def offsets_mem(pm, client):
 
     
 def client_mem(pm, i, entity_ptr, entity_list, local_player_pawn_addr, local_player_team):
-    entity_controller = pm.read_longlong(entity_ptr + 0x78 * (i & 0x1FF))
+    entity_controller = pm.read_longlong(entity_ptr + 0x70 * (i & 0x1FF))
     if entity_controller == 0:
         return
     entity_controller_pawn = pm.read_longlong(entity_controller + m_hPlayerPawn)
     if entity_controller_pawn == 0:
+
         return
     entity_list_pawn = pm.read_longlong(entity_list + 0x8 * ((entity_controller_pawn & 0x7FFF) >> 0x9) + 0x10)
     if entity_list_pawn == 0:
+
         return
-    entity_pawn_addr = pm.read_longlong(entity_list_pawn + 0x78 * (entity_controller_pawn & 0x1FF))
+    entity_pawn_addr = pm.read_longlong(entity_list_pawn + 0x70 * (entity_controller_pawn & 0x1FF))
     if entity_pawn_addr == 0 or entity_pawn_addr == local_player_pawn_addr:
+        if i < 2 and entity_pawn_addr == 0: print(f"DB: Idx {i} NoAddr (ListPawn={hex(entity_list_pawn)})")
         return
     entity_team = pm.read_int(entity_pawn_addr + m_iTeamNum)
     #if entity_team == local_player_team:
@@ -173,7 +226,7 @@ def esp_dweapon(pm, i, entity_list, view_matrix, width, height):
     itementitylistentry = pm.read_longlong(entity_list + 8 * ((i & 0x7FFF) >> 9) + 16)
     if not itementitylistentry:
         return
-    itementity = pm.read_longlong(itementitylistentry + 120 * (i & 0x1FF))
+    itementity = pm.read_longlong(itementitylistentry + 112 * (i & 0x1FF))
     if not itementity:
         return
     itementitynode = pm.read_longlong(itementity + m_pGameSceneNode)
@@ -1449,7 +1502,10 @@ def auto_accept(settings):
         else:
             time.sleep(0.5)
 
-client, pm = descritptor()
+try:
+    client, pm = descritptor()
+except:
+    client, pm = None, None
 
 def forcejump():
     hwnd = win32gui.FindWindow(None, 'Counter-Strike 2')
@@ -1458,6 +1514,13 @@ def forcejump():
     win32api.SendMessage(hwnd, win32con.WM_KEYUP, win32con.VK_SPACE, 0)
 
 def bunnyhop(settings):
+    global client, pm
+    if client is None or pm is None:
+        try:
+            client, pm = descritptor()
+        except:
+            pass
+
     while True:
         try:
             s_cache = {
@@ -1471,6 +1534,7 @@ def bunnyhop(settings):
             key_code = win32_key_map.get(s_cache['bunnyhop_key'], 0)
             if win32api.GetAsyncKeyState(key_code) & 0x8000:
                 view_matrix, local_player_pawn_addr, local_player_team, entity_list, entity_ptr = offsets_mem(pm, client)
+
                 PlayerMoveFlag = pm.read_int(local_player_pawn_addr + m_fFlags)
                 if (PlayerMoveFlag == 65665 or PlayerMoveFlag == 65667):
                     forcejump()
@@ -1651,7 +1715,10 @@ class Settings:
         return files if files else ["No configs found"]
     
 
-client, pm = descritptor()
+try:
+    client, pm = descritptor()
+except:
+    client, pm = None, None
 
 center_x_circle = WINDOW_WIDTH // 2 + 0.5
 center_y_circle = WINDOW_HEIGHT // 2 + 0.5
@@ -1699,6 +1766,8 @@ def weapon_worker(shared_list, settings_proxy):
         time.sleep(0.1)
 
 def esp(draw_list):
+    
+
     global center_x_circle, center_y_circle
     
     if is_cs2_window_active() is None or not settings.get("esp_enable"):
@@ -1748,6 +1817,7 @@ def esp(draw_list):
     center_y = WINDOW_HEIGHT * 0.90
 
     view_matrix, local_player_pawn_addr, local_player_team, entity_list, entity_ptr = offsets_mem(pm, client)
+
     if local_player_team == 0 or entity_ptr == 0:
         return
     
@@ -1766,11 +1836,14 @@ def esp(draw_list):
     for i in range(1, 65):
         try:
             client_m = client_mem(pm, i, entity_ptr, entity_list, local_player_pawn_addr, local_player_team)
+            # Debug trace added via script
             if not client_m:
                 continue
 
+            # print(f'[DEBUG] Entity {i}: Found! Team={client_m[0]}, Pawn={client_m[2]}')
             entity_team, _, entity_pawn_addr, entity_controller, spotted = client_m
             bottom_left_x, bottom_y, bone_matrix, headX, headY, headZ, head_pos = esp_line(pm, entity_pawn_addr, view_matrix, WINDOW_WIDTH, WINDOW_HEIGHT)
+            # print(f'[DEBUG] Entity {i}: W2S Result HeadPos={head_pos}')
             if head_pos[1] < 0:
                 continue
             
@@ -1854,6 +1927,13 @@ def esp(draw_list):
 settings = None
 
 def wallhack(s):
+    global client, pm
+    if client is None or pm is None:
+        try:
+            client, pm = descritptor()
+        except:
+            pass
+
     global settings, weapon_draw_list
     settings = s
     manager = Manager()
@@ -1895,7 +1975,7 @@ def menu(s):
     window_width, window_height = 800, 600
     glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
     glfw.window_hint(glfw.DECORATED, glfw.FALSE)
-    window = glfw.create_window(window_width, window_height, "Cheat Menu", None, None)
+    window = glfw.create_window(window_width, window_height, "Engy Services", None, None)
     if not window:
         glfw.terminate()
         return
@@ -2112,9 +2192,19 @@ def menu(s):
             except OSError as e:
                 pass
 
-client, pm = descritptor()
+try:
+    client, pm = descritptor()
+except:
+    client, pm = None, None
 
 def norecoil(settings):
+    global client, pm
+    if client is None or pm is None:
+        try:
+            client, pm = descritptor()
+        except:
+            pass
+
     while True:
         s_cache = {
             'norecoil_enable': settings.get('norecoil_enable'),
@@ -2137,7 +2227,10 @@ def norecoil(settings):
             pass
         time.sleep(0.001)
 
-client, pm = descritptor()
+try:
+    client, pm = descritptor()
+except:
+    client, pm = None, None
 
 def send_mouse_click():
    if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
@@ -2148,7 +2241,14 @@ def send_mouse_click():
    return True
 
 def triggerbot(settings):
-   while True:
+    global client, pm
+    if client is None or pm is None:
+        try:
+            client, pm = descritptor()
+        except:
+            pass
+
+    while True:
         s_cache = {
             'trigger_enable': settings.get('trigger_enable'),
             'trigger_key': settings.get('trigger_key'),
@@ -2178,7 +2278,7 @@ def triggerbot(settings):
                if entityId > 0:
                    entList = pm.read_longlong(client + dwEntityList)
                    entEntry = pm.read_longlong(entList + 0x8 * (entityId >> 9) + 0x10)
-                   entity = pm.read_longlong(entEntry + 120 * (entityId & 0x1FF))
+                   entity = pm.read_longlong(entEntry + 112 * (entityId & 0x1FF))
                    
                    entityTeam = pm.read_int(entity + m_iTeamNum)
                    playerTeam = pm.read_int(player + m_iTeamNum)
@@ -2210,5 +2310,23 @@ if __name__ == "__main__":
             ]
             for process in processes:
                 process.start()
+            
+            print("Cheat started. Press 'q' to quit.")
+            while True:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key.lower() == b'q':
+                        print("Quitting...")
+                        for process in processes:
+                            process.terminate()
+                        break
+                
+                # Check if all processes are dead
+                if not any(p.is_alive() for p in processes):
+                    break
+                
+                time.sleep(0.1)
+                
             for process in processes:
-                process.join()
+                if process.is_alive():
+                    process.join(timeout=1.0)
